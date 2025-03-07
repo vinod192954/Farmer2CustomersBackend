@@ -12,13 +12,14 @@ const {
 // Add a product
 router.post("/products", verifyToken, checkSellerRole, async (req, res) => {
   try {
-    const { name, price, description, category, image } = req.body;
+    const { name, price, description, category, image,quantity } = req.body;
     const newProduct = new Product({
       name,
       price,
       description,
       category,
       image,
+      quantity,
       sellerId: req.user.userId, // Getting seller's ID from token
     });
     await newProduct.save();
@@ -132,5 +133,8 @@ router.get("/messages", verifyToken, checkSellerRole, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+
+
 
 module.exports = router;

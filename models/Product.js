@@ -8,11 +8,11 @@ const productSchema = new mongoose.Schema(
     description: { type: String },
     category: { type: String, required: true },
     image: { type: String, required: true },
-    sellerId: { 
-      type: mongoose.Schema.Types.ObjectId, 
-      ref: "User", 
-      required: true 
-    }
+    sellerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
   },
   { timestamps: true }
 );

@@ -6,8 +6,14 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     role: { type: String, enum: ["buyer", "seller", "admin"], required: true },
-    isApproved: { type: Boolean, default: function () { return this.role === "buyer"; } }, // Auto approve buyers
+    isApproved: {
+      type: Boolean,
+      default: function () {
+        return this.role === "buyer";
+      },
+    }, // Auto approve buyers
   },
+
   { timestamps: true }
 );
 

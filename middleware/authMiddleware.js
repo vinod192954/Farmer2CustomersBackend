@@ -1,6 +1,8 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const Seller = require("../models/Seller");
 const JWT_SECRET = process.env.JWT_SECRET || "vinod";
+
 const verifyToken = (req, res, next) => {
   const token = req.header("Authorization");
   console.log("Authorization Header:", token); // Log raw header
@@ -14,7 +16,7 @@ const verifyToken = (req, res, next) => {
   console.log("Extracted Token:", extractedToken); // Log extracted token
 
   try {
-    console.log("JWT_SECRET:",JWT_SECRET); // Log secret key
+    console.log("JWT_SECRET:", JWT_SECRET); // Log secret key
     const verified = jwt.verify(extractedToken, JWT_SECRET);
     console.log("Verification Success:", verified);
 
@@ -27,12 +29,19 @@ const verifyToken = (req, res, next) => {
 };
 
 const checkSellerRole = async (req, res, next) => {
-  const user = await User.findById(req.user.userId);
-  console.log("user data",user)
-  if (user?.role !== "seller") {
-    return res.status(403).json({ message: "Access forbidden: Sellers only" });
+  try {
+    // Check if the user exists in the Seller model
+    const seller = await Seller.findById(req.user.userId);
+    console.log("Seller Data:", seller);
+
+    if (!seller) {
+      return res.status(403).json({ message: "Access forbidden: Sellers only" });
+    }
+    next();
+  } catch (error) {
+    console.error("Error checking seller role:", error.message);
+    res.status(500).json({ message: "Server Error" });
   }
-  next();
 };
 
 module.exports = { verifyToken, checkSellerRole };

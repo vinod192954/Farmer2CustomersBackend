@@ -1,26 +1,142 @@
 const express = require("express");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 const router = express.Router();
+const Seller = require("../models/Seller");
 const Product = require("../models/Product");
 const Order = require("../models/Orders");
 const Message = require("../models/Message");
 const {
   verifyToken,
   checkSellerRole,
-} = require("../middleware/authMiddleware"); // Middleware for authentication
+} = require("../middleware/authMiddleware");
 
-// **Product Management**
-// Add a product
+const JWT_SECRET = process.env.JWT_SECRET || "vinod"; // Default secret if not in env
+
+// **Seller Registration**
+router.post("/register", async (req, res) => {
+  try {
+    const { name, email, password, businessName, businessAddress,phone } = req.body;
+
+    // Check if seller already exists
+    const existingSeller = await Seller.findOne({ email });
+    if (existingSeller) {
+      return res.status(400).json({ message: "Seller already exists" });
+    }
+
+    // Hash password before saving
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create new seller
+    const newSeller = new Seller({
+      name: name.trim(),
+      email: email.trim(),
+      password: hashedPassword,
+      businessName: businessName.trim(),
+      businessAddress: businessAddress.trim(),
+      phone: phone?.toString().trim() || "",
+    });
+    await newSeller.save();
+
+    res.status(201).json({ message: "Seller registered successfully" });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// **Seller Login**
+router.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // Find seller
+    const seller = await Seller.findOne({ email: email.trim() });
+    if (!seller) {
+      return res.status(404).json({ message: "Seller not found" });
+    }
+
+    // Check password
+    const isMatch = await bcrypt.compare(password, seller.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Invalid credentials" });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign({ userId: seller._id, role: "seller" }, JWT_SECRET, {
+      expiresIn: "1d",
+    });
+
+    // Set token in cookie
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 24 * 60 * 60 * 1000,
+    });
+
+    res.json({ message: "Login successful", token });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// **Get Seller Profile**
+router.get("/profile", verifyToken, checkSellerRole, async (req, res) => {
+  try {
+    const seller = await Seller.findById(req.user.userId).select("-password");
+    if (!seller) return res.status(404).json({ message: "Seller not found" });
+
+    res.json(seller);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// **Update Seller Profile**
+router.put("/profile", verifyToken, checkSellerRole, async (req, res) => {
+  try {
+    const updates = { ...req.body };
+
+    // If password update is requested, hash it
+    if (updates.password) {
+      updates.password = await bcrypt.hash(updates.password, 10);
+    }
+
+    const updatedSeller = await Seller.findByIdAndUpdate(
+      req.user.userId,
+      updates,
+      { new: true }
+    ).select("-password");
+    if (!updatedSeller)
+      return res.status(404).json({ message: "Seller not found" });
+
+    res.json({
+      message: "Profile updated successfully",
+      seller: updatedSeller,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// **Product Management** (Linked to seller)
 router.post("/products", verifyToken, checkSellerRole, async (req, res) => {
   try {
-    const { name, price, description, category, image } = req.body;
+    const { name, price, description, category, image, quantity } = req.body;
+    const seller = await Seller.findById(req.user.userId);
+
+    if (!seller) return res.status(404).json({ message: "Seller not found" });
+
     const newProduct = new Product({
-      name,
+      name: name.trim(),
       price,
-      description,
-      category,
+      description: description.trim(),
+      category: category.trim(),
       image,
-      sellerId: req.user.userId, // Getting seller's ID from token
+      quantity,
+      sellerId: seller._id,
+      sellerName: seller.businessName,
     });
+
     await newProduct.save();
     res
       .status(201)
@@ -30,49 +146,10 @@ router.post("/products", verifyToken, checkSellerRole, async (req, res) => {
   }
 });
 
-// Update product details
-router.put("/products/:id", verifyToken, checkSellerRole, async (req, res) => {
-  try {
-    const product = await Product.findOne({
-      _id: req.params.id,
-      sellerId: req.user.id,
-    });
-    if (!product) return res.status(404).json({ message: "Product not found" });
-
-    Object.assign(product, req.body); // Update fields
-    await product.save();
-    res.json({ message: "Product updated successfully", product });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Delete a product
-router.delete(
-  "/products/:id",
-  verifyToken,
-  checkSellerRole,
-  async (req, res) => {
-    try {
-      const product = await Product.findOneAndDelete({
-        _id: req.params.id,
-        sellerId: req.user.id,
-      });
-      if (!product)
-        return res.status(404).json({ message: "Product not found" });
-
-      res.json({ message: "Product deleted successfully" });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  }
-);
-
-// **Order Management**
-// Get seller's orders
+// **Get Seller's Orders**
 router.get("/orders", verifyToken, checkSellerRole, async (req, res) => {
   try {
-    const orders = await Order.find({ sellerId: req.user.id }).populate(
+    const orders = await Order.find({ sellerId: req.user.userId }).populate(
       "productId buyerId"
     );
     res.json(orders);
@@ -81,53 +158,19 @@ router.get("/orders", verifyToken, checkSellerRole, async (req, res) => {
   }
 });
 
-// Update order status
-router.put(
-  "/orders/:id/status",
-  verifyToken,
-  checkSellerRole,
-  async (req, res) => {
-    try {
-      const { status } = req.body;
-      const order = await Order.findOne({
-        _id: req.params.id,
-        sellerId: req.user.id,
-      });
-      if (!order) return res.status(404).json({ message: "Order not found" });
-
-      order.status = status;
-      await order.save();
-      res.json({ message: "Order status updated", order });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  }
-);
-
-// **Communication**
-// Send a message to a buyer
+// **Send Message to Buyer**
 router.post("/messages", verifyToken, checkSellerRole, async (req, res) => {
   try {
     const { receiverId, message } = req.body;
+
     const newMessage = new Message({
-      senderId: req.user.id,
+      senderId: req.user.userId,
       receiverId,
-      message,
+      message: message.trim(),
     });
+
     await newMessage.save();
     res.status(201).json({ message: "Message sent successfully", newMessage });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get all messages sent/received by the seller
-router.get("/messages", verifyToken, checkSellerRole, async (req, res) => {
-  try {
-    const messages = await Message.find({
-      $or: [{ senderId: req.user.id }, { receiverId: req.user.id }],
-    }).populate("senderId receiverId", "name email");
-    res.json(messages);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
